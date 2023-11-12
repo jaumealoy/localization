@@ -1,6 +1,7 @@
 use std::collections::HashMap;
+use serde::Serialize;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub struct TranslationPage(HashMap<String, String>);
 
 impl TranslationPage {
