@@ -1,0 +1,1 @@
+pub mod mysql_translation_page_repository;
