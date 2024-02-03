@@ -32,9 +32,7 @@ The current features are:
 - Retrieve a page of translations
 - Retrieve a single translation from a text
 - Rust library to consume the REST API, an in-memory cache client is also provided
-
-A user interface to create and edit translations is planned to be created in upcoming releases. 
-For now, the only way to create new literals or pages is through an SQL client.
+- User interface to manage languages, pages and translations
 
 ### Rust API Client
 
@@ -48,4 +46,11 @@ let localization_client = localization_client::CachedLocalizationClient::new(
     std::time::Duration::from_sec(300), 
     "http://localhost:3000"
 );
+```
+
+### Web User Interface
+
+Sample .env file:
+```
+API_URL=http://localhost:3000
 ```

@@ -1,16 +1,31 @@
-use std::{error::Error, sync::Arc, net::SocketAddr, collections::HashMap};
-use axum::{Router, response::IntoResponse, routing::get, extract::{State, Path}, Json};
+use axum::{
+    extract::{Path, State},
+    response::IntoResponse,
+    routing::{get, post},
+    Json, Router,
+};
+use std::{collections::HashMap, error::Error, sync::Arc};
 
-use crate::domain::translations::TranslationPageRepository;
+use crate::{
+    controllers,
+    domain::{languages::LanguageRepository, pages::PageRepository, translations::TranslationPageRepository},
+};
 
 pub struct AppContext {
-    pub translation_repository: Arc<dyn TranslationPageRepository + Send + Sync>
+    pub translation_repository: Arc<dyn TranslationPageRepository + Send + Sync>,
+    pub page_repository: Arc<dyn PageRepository + Send + Sync>,
+    pub language_repository: Arc<dyn LanguageRepository + Send + Sync>,
 }
 
 pub async fn start(state: AppContext) -> Result<(), Box<dyn Error>> {
     let shared_state = Arc::new(state);
 
     let app = Router::new()
+        .route("/pages", get(controllers::pages::get_pages))
+        .route("/pages", post(controllers::pages::create_page))
+        .route("/languages", get(controllers::languages::get_languages))
+        .route("/languages", post(controllers::languages::update_languages))
+        .route("/:page/:language", post(controllers::translation_page::save_translation_page))
         .route("/:page/:language", get(get_page))
         .route("/:page/:literal/:language", get(get_literal))
         .with_state(shared_state);
@@ -20,19 +35,24 @@ pub async fn start(state: AppContext) -> Result<(), Box<dyn Error>> {
         .parse::<u16>()
         .unwrap_or(3000);
 
-    let address = SocketAddr::from(([0, 0, 0, 0], port));
-    let _ = axum::Server::bind(&address)
-        .serve(app.into_make_service())
-        .await?;
+    let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port))
+        .await
+        .unwrap();
+
+    log::info!("Application is running on port {}", port);
+
+    let _ = axum::serve(listener, app).await?;
 
     Ok(())
 }
 
 async fn get_page(
     Path((page, language)): Path<(String, String)>,
-    State(context): State<Arc<AppContext>>
+    State(context): State<Arc<AppContext>>,
 ) -> impl IntoResponse {
-    let result = context.translation_repository.get_language(&page, &language)
+    let result = context
+        .translation_repository
+        .get_language(&page, &language)
         .await;
 
     if let Ok(Some(page)) = result {
@@ -45,6 +65,13 @@ async fn get_page(
         }
 
         return Json(dictionary);
+    } else if let Err(error) = result {
+        log::error!(
+            "Error recovering page literals. Page = {}, Language = {}\nError: {:?}",
+            &page,
+            &language,
+            error.to_string()
+        );
     }
 
     Json(HashMap::new())
@@ -52,14 +79,23 @@ async fn get_page(
 
 async fn get_literal(
     Path((page, literal, language)): Path<(String, String, String)>,
-    State(context): State<Arc<AppContext>>
+    State(context): State<Arc<AppContext>>,
 ) -> impl IntoResponse {
-    let result = context.translation_repository
+    let result = context
+        .translation_repository
         .get_literal(&page, &literal, &language)
         .await;
 
     if let Ok(Some(text)) = result {
         return Json(serde_json::Value::String(text));
+    } else if let Err(error) = result {
+        log::error!(
+            "Error recovering page literals. Page = {}, Key = {}, Language = {}\nError: {:?}",
+            &page,
+            &literal,
+            &language,
+            error.to_string()
+        );
     }
 
     Json(serde_json::Value::Null)
