@@ -1,7 +1,9 @@
+use std::vec;
+
 use log::error;
 use mysql_async::{
     params,
-    prelude::{Query, WithParams},
+    prelude::{Query, Queryable, WithParams},
     Conn, Pool, Row, TxOpts,
 };
 
@@ -28,7 +30,10 @@ impl TranslationPageRepository for MySQLTranslationPageRepository {
         let options = TxOpts::default();
         let mut tx = connection.start_transaction(options).await?;
 
+        let mut i = 0;
         for literal in &page.literals {
+            i += 1;
+
             if !literal.modified {
                 // this literal has not been created nor updated
                 continue;
@@ -38,21 +43,23 @@ impl TranslationPageRepository for MySQLTranslationPageRepository {
                 "literal_key" => &literal.id,
                 "text" => &literal.text,
                 "page_id" => &page.id,
-                "language" => &page.language
+                "language" => &page.language,
+                "order" => i,
             };
 
-            let update_result = r"update literals set `text` = :text where pageId = :page_id and `key` = :literal_key and language = :language"
+            let update_result = r"update literals set `text` = :text, `order` = :order where pageId = :page_id and `key` = :literal_key and language = :language"
                 .with(params.clone())
                 .run(&mut tx)
                 .await;
 
             if let Ok(result) = update_result {
                 if result.affected_rows() == 0 {
-                    let insert_result = "insert into literals (pageId, `key`, language, `text`) 
-                        values (:page_id, :literal_key, :language, :text)"
-                        .with(params.clone())
-                        .ignore(&mut tx)
-                        .await;
+                    let insert_result =
+                        "insert into literals (pageId, `key`, language, `text`, `order`) 
+                        values (:page_id, :literal_key, :language, :text, :order)"
+                            .with(params.clone())
+                            .ignore(&mut tx)
+                            .await;
 
                     if let Err(error) = insert_result {
                         log::error!(
@@ -77,6 +84,33 @@ impl TranslationPageRepository for MySQLTranslationPageRepository {
                 if let Err(_) = update_other_literals {
                     log::error!("Error while setting as not reviewed. Page = {}, Key = {}, Language = not default", &page.id, &literal.id);
                 }
+            }
+        }
+
+        if page.language == default_language {
+            // delete all the literals that are not in the page
+            let contains_query = format!(
+                "delete from literals where pageId = ? and `key` not in ({})",
+                (0..page.literals.len())
+                    .map(|_| "?")
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+
+            let mut parameters = vec![page.id.to_owned()];
+            for literal in &page.literals {
+                parameters.push(literal.id.to_owned());
+            }
+
+            let delete_result = tx.exec_drop(contains_query, parameters).await;
+
+            if let Err(error) = delete_result {
+                log::error!(
+                    "Error deleting literals. Page = {}, Language = {} ({:?})",
+                    &page.id,
+                    &page.language,
+                    error
+                );
             }
         }
 
@@ -126,7 +160,8 @@ impl TranslationPageRepository for MySQLTranslationPageRepository {
             from languages
                 join literals m on m.pageId = :page_id and m.language = languages.code
                 left join literals t on t.pageId = m.pageId and m.key = t.key and t.language = :language
-            where languages.isDefaultLanguage = 1"
+            where languages.isDefaultLanguage = 1
+            order by m.`order` asc"
             .with(params! {
                 "page_id" => page_id,
                 "language" => language

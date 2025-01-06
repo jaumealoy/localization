@@ -16,7 +16,6 @@ mod web;
 async fn main() {
     if let Err(_) = dotenv::dotenv() {
         error!("Error loading envrionment variables");
-        std::process::exit(-1);
     }
 
     env_logger::init();

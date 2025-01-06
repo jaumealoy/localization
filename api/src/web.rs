@@ -1,14 +1,18 @@
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     response::IntoResponse,
     routing::{get, post},
     Json, Router,
 };
+use serde_json::json;
 use std::{collections::HashMap, error::Error, sync::Arc};
 
 use crate::{
     controllers,
-    domain::{languages::LanguageRepository, pages::PageRepository, translations::TranslationPageRepository},
+    domain::{
+        languages::LanguageRepository, pages::PageRepository,
+        translations::TranslationPageRepository,
+    },
 };
 
 pub struct AppContext {
@@ -25,7 +29,10 @@ pub async fn start(state: AppContext) -> Result<(), Box<dyn Error>> {
         .route("/pages", post(controllers::pages::create_page))
         .route("/languages", get(controllers::languages::get_languages))
         .route("/languages", post(controllers::languages::update_languages))
-        .route("/:page/:language", post(controllers::translation_page::save_translation_page))
+        .route(
+            "/:page/:language",
+            post(controllers::translation_page::save_translation_page),
+        )
         .route("/:page/:language", get(get_page))
         .route("/:page/:literal/:language", get(get_literal))
         .with_state(shared_state);
@@ -49,22 +56,33 @@ pub async fn start(state: AppContext) -> Result<(), Box<dyn Error>> {
 async fn get_page(
     Path((page, language)): Path<(String, String)>,
     State(context): State<Arc<AppContext>>,
+    Query(query): Query<HashMap<String, String>>,
 ) -> impl IntoResponse {
     let result = context
         .translation_repository
         .get_language(&page, &language)
         .await;
 
+    let sorted = query.get("sorted").is_some();
+
     if let Ok(Some(page)) = result {
-        let mut dictionary = HashMap::<String, String>::new();
-
-        for entry in page.literals {
-            if let Some(text) = entry.text {
-                dictionary.insert(entry.id, text);
+        if sorted {
+            let mut sorted_literals = Vec::with_capacity(page.literals.len());
+            for literal in page.literals {
+                sorted_literals.push(json!({ "key": literal.id, "text": literal.text }));
             }
-        }
+            return Json(json!(sorted_literals));
+        } else {
+            let mut dictionary = HashMap::<String, String>::new();
 
-        return Json(dictionary);
+            for entry in page.literals {
+                if let Some(text) = entry.text {
+                    dictionary.insert(entry.id, text);
+                }
+            }
+
+            return Json(json!(dictionary));
+        }
     } else if let Err(error) = result {
         log::error!(
             "Error recovering page literals. Page = {}, Language = {}\nError: {:?}",
@@ -74,7 +92,11 @@ async fn get_page(
         );
     }
 
-    Json(HashMap::new())
+    Json(if sorted {
+        json!(Vec::<serde_json::Value>::new())
+    } else {
+        json!(HashMap::<String, String>::new())
+    })
 }
 
 async fn get_literal(

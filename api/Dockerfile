@@ -1,4 +1,4 @@
-FROM rust:latest AS BUILD
+FROM rust:1.75 AS BUILD
 
 # copy source files to image /app folder
 WORKDIR /app
@@ -16,4 +16,4 @@ WORKDIR /app
 COPY --from=BUILD /app/target/release/api .
 
 EXPOSE 3000
-ENTRYPOINT ["/app/api"]
+CMD ["/app/api"]

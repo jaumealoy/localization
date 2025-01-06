@@ -6,6 +6,7 @@ export type Language = {
 };
 
 export type TranslationPage = {[key: string]: string};
+export type SortedTranslationPage = Array<{  key: string, text: string }>;
 
 export default (baseUrl: string) => {
     return {
@@ -39,6 +40,16 @@ export default (baseUrl: string) => {
             "use server";
             return await fetch(
                 `${baseUrl}/${id}/${language}`,
+                { 
+                    cache: 'no-store',
+                    method: "GET" 
+            }).then(res => res.json());
+        },
+
+        getSortedPage: async (id: string, language: string) : Promise<SortedTranslationPage> => {
+            "use server";
+            return await fetch(
+                `${baseUrl}/${id}/${language}?sorted=true`,
                 { 
                     cache: 'no-store',
                     method: "GET" 
